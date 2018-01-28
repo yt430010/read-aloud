@@ -94,18 +94,14 @@ function TabSource() {
 
 
 function Doc(source, onEnd) {
-  var info;
   var currentIndex;
   var activeSpeech;
-  var ready = source.ready.then(function(result) {
-    info = result;
-  })
+  var ready = source.ready;
 
   this.close = close;
   this.play = play;
   this.stop = stop;
   this.pause = pause;
-  this.getInfo = getInfo;
   this.getState = getState;
   this.getActiveSpeech = getActiveSpeech;
   this.forward = forward;
@@ -124,12 +120,16 @@ function Doc(source, onEnd) {
   //method play
   function play() {
     return ready
-      .then(function() {
-        if (activeSpeech) return activeSpeech.play();
+      .then(function(docInfo) {
+        if (activeSpeech) {
+          return activeSpeech.play()
+            .then(function() {return docInfo})
+        }
         else {
           return source.getCurrentIndex()
             .then(function(index) {currentIndex = index})
             .then(function() {return readCurrent()})
+            .then(function() {return docInfo})
         }
       })
   }
@@ -144,13 +144,13 @@ function Doc(source, onEnd) {
         else if (onEnd) onEnd();
       })
     function read(texts) {
-      return Promise.resolve()
-        .then(function() {
-          if (!info.lang)
+      return ready
+        .then(function(docInfo) {
+          if (!docInfo.lang)
             return detectLanguage(texts)
               .then(function(lang) {
                 console.log("Detected", lang);
-                info.lang = lang;
+                docInfo.lang = lang;
               })
         })
         .then(getSpeech.bind(null, texts))
@@ -208,20 +208,20 @@ function Doc(source, onEnd) {
   }
 
   function getSpeech(texts) {
-    return getSettings()
-      .then(function(settings) {
+    return Promise.all([ready, getSettings()])
+      .then(spread(function(docInfo, settings) {
         var options = {
           rate: settings.rate || defaults.rate,
           pitch: settings.pitch || defaults.pitch,
           volume: settings.volume || defaults.volume,
-          lang: info.lang,
+          lang: docInfo.lang,
         }
         return getSpeechVoice(settings.voiceName, options.lang)
           .then(function(voiceName) {
             options.voiceName = voiceName;
             return new Speech(texts, options);
           })
-      })
+      }))
   }
 
   function getSpeechVoice(voiceName, lang) {
@@ -282,11 +282,6 @@ function Doc(source, onEnd) {
       .then(function() {
         if (activeSpeech) return activeSpeech.pause();
       })
-  }
-
-  //method getInfo
-  function getInfo() {
-    return ready.then(function() {return info});
   }
 
   //method getState
