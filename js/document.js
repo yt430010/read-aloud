@@ -146,11 +146,13 @@ function Doc(source, onEnd) {
     function read(texts) {
       return ready
         .then(function(docInfo) {
-          if (!docInfo.lang)
             return detectLanguage(texts)
               .then(function(lang) {
                 console.log("Detected", lang);
-                docInfo.lang = lang;
+                if (lang) {
+                  if (docInfo.lang && docInfo.lang.lastIndexOf(lang,0) == 0);
+                  else docInfo.lang = lang;
+                }
               })
         })
         .then(getSpeech.bind(null, texts))

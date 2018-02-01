@@ -98,6 +98,7 @@ function makeDoc() {
     else if (location.hostname == "www.quora.com") return new QuoraPage();
     else if (location.hostname == "www.khanacademy.org") return new KhanAcademy();
     else if (location.hostname == "bookshelf.vitalsource.com") return new VitalSourceBookshelf();
+    else if (location.hostname == "reader.chegg.com") return new CheggBook();
     else if (location.pathname.match(/\.pdf$/)) return new PdfDoc(location.href);
     else if ($("embed[type='application/pdf']").length) return new PdfDoc($("embed[type='application/pdf']").attr("src"));
     else return new HtmlDoc();
@@ -497,6 +498,39 @@ function VitalSourceBookshelf() {
     if (iframe) location.href = iframe.src;
     return null;
   };
+}
+
+
+function CheggBook() {
+  this.getCurrentIndex = function() {
+    return $(".page.current").index();
+  }
+
+  this.getTexts = function(index, quietly) {
+    var firstPage = $(".page").get(0);
+    var page = $(".page").get(index);
+    if (page) {
+      var viewport = $(".PageScroller").get(0);
+      var oldScrollTop = viewport.scrollTop;
+      viewport.scrollTop = $(page).position().top - $(firstPage).position().top;
+      return tryGetTexts(getTexts.bind(page), 4000)
+        .then(function(result) {
+          if (quietly) viewport.scrollTop = oldScrollTop;
+          return result;
+        })
+    }
+    else return null;
+  }
+
+  function getTexts() {
+    var texts = $("> .content > .newpage > .text_layer > .ie_fix > div > span", this).get().map(getInnerText).filter(isNotEmpty);
+    return fixParagraphs(texts).map(replaceSurrogates);
+  }
+
+  function replaceSurrogates(text) {
+    return text.replace(/\udbbe\udf02/g, "fl")
+      .replace(/\udbbe\udf01/g, "fi")
+  }
 }
 
 
