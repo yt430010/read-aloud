@@ -64,7 +64,7 @@
   display: none;
 }
 
-#hotkeys-link {
+#hotkeys-link, #aws-settings-link {
   color: gray;
   cursor: pointer;
   text-decoration: underline;

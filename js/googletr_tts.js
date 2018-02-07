@@ -16,6 +16,7 @@ function RemoteTTS(host) {
   var prefetchAudio = document.createElement("AUDIO");
   var nextStartTime = 0;
   var waitTimer;
+  var polly;
 
   this.speak = function(utterance, options, onEvent) {
     if (!options.volume) options.volume = 1;
@@ -26,7 +27,6 @@ function RemoteTTS(host) {
       audio.volume = options.volume;
       audio.defaultPlaybackRate = options.rate;
     }
-    audio.src = getAudioUrl(utterance, options.lang, options.voiceName);
     audio.oncanplay = function() {
       var waitTime = nextStartTime - new Date().getTime();
       if (waitTime > 0) waitTimer = setTimeout(audio.play.bind(audio), waitTime);
@@ -37,7 +37,18 @@ function RemoteTTS(host) {
     audio.onerror = function() {
       onEvent({type: "error", errorMessage: audio.error.message});
     };
-    audio.load();
+    return Promise.resolve(usePolly(options.voiceName) && pollyReady())
+      .then(function() {
+        if (polly) return pollySynthesizeSpeech(utterance, options.voiceName.match(/\((\w+)\)/)[1]);
+        else return getAudioUrl(utterance, options.lang, options.voiceName);
+      })
+      .then(function(url) {
+        audio.src = url;
+        audio.load();
+      })
+      .catch(function(err) {
+        onEvent({type: "error", errorMessage: err.message});
+      })
   }
 
   this.isSpeaking = function(callback) {
@@ -55,6 +66,7 @@ function RemoteTTS(host) {
   }
 
   this.prefetch = function(utterance, options) {
+    if (usePolly(options.voiceName)) return;
     prefetchAudio.src = getAudioUrl(utterance, options.lang, options.voiceName);
   }
 
@@ -64,5 +76,35 @@ function RemoteTTS(host) {
 
   function getAudioUrl(utterance, lang, voiceName) {
     return host + "/read-aloud/speak/" + lang + "/" + encodeURIComponent(voiceName) + "?q=" + encodeURIComponent(utterance);
+  }
+
+  function usePolly(voiceName) {
+    return voiceName == "Amazon US English (Matthew)" || voiceName == "Amazon US English (Joanna)";
+  }
+
+  function pollyReady() {
+    if (polly) return Promise.resolve();
+    return getSettings(["awsCreds"])
+      .then(function(items) {return items.awsCreds})
+      .then(function(creds) {
+        if (creds) polly = new AWS.Polly(Object.assign({region: "us-east-1"}, creds));
+      })
+  }
+
+  function pollySynthesizeSpeech(utterance, voiceId) {
+    return new Promise(function(fulfill, reject) {
+      polly.synthesizeSpeech({
+        OutputFormat: "mp3",
+        Text: utterance,
+        VoiceId: voiceId
+      },
+      function(err, data) {
+        if (err) reject(err);
+        else fulfill(new Blob([data.AudioStream], {type: data.ContentType}));
+      })
+    })
+    .then(function(blob) {
+      return URL.createObjectURL(blob);
+    })
   }
 }

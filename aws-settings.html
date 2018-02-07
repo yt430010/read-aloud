@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" type="text/css" href="css/common.css">
+  <style>
+    body {
+      font-size: 1em;
+      color: #333;
+    }
+    li {
+      margin-top: 10px;
+    }
+    .page {
+      max-width: 700px;
+    }
+    .my-form {
+      display: inline-block;
+      background-color: #eee;
+      border-radius: 5px;
+      padding: 20px;
+    }
+    .label {
+      margin: 15px 0 3px 0;
+      color: gray;
+    }
+  </style>
+
+  <script src="js/es6-promise.auto.min.js"></script>
+  <script src="js/jquery-3.1.1.min.js"></script>
+  <script src="js/defaults.js"></script>
+  <script src="js/aws-settings.js"></script>
+</head>
+<body>
+  <div class="page">
+    <h1>AWS Settings</h1>
+
+    <p>
+      Please follow these steps to set up AWS.  Once setup, Read Aloud will use your
+      AWS account to provide the Amazon Joanna and Matthew voices.
+    </p>
+    <ol>
+      <li>
+        Sign in to the AWS IAM console:
+        <a href="https://console.aws.amazon.com/iam/home?#/users">https://console.aws.amazon.com/iam/home?#/users</a>
+      </li>
+      <li>
+        Create a user with "Programmatic Access".
+      </li>
+      <li>
+        When asked to select permissions, choose "Attach existing policies directly",
+        then search and add a policy called "AmazonPollyReadOnlyAccess".
+      </li>
+      <li>
+        After creating the user, remember to download the access key, which includes
+        an AccessKeyID and a SecretAccessKey.  Enter them in the form below.
+      </li>
+    </ol>
+
+    <div class="my-form">
+      <div class="label">Access key ID</div>
+      <input type="text" id="access-key-id" size="40" />
+
+      <div class="label">Secret access key</div>
+      <input type="text" id="secret-access-key" size="40" />
+
+      <div class="label"></div>
+      <input type="button" id="save-button" value="Save" />
+
+      <div class="label"></div>
+      <span id="status"></span>
+    </div>
+  </div>
+</body>
+</html>
