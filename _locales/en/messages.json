@@ -50,17 +50,17 @@
   "context_read_selection": {
     "message": "Read aloud selected text"
   },
+  "error_no_text": {
+    "message": "Didn't find any text to read"
+  },
   "error_no_voice": {
-    "message": "No voice ({lang})"
+    "message": "Language not supported '{lang}'"
   },
-  "uploadpdf_message1": {
-    "message": "{extension_name} cannot access local files stored on your computer."
+  "error_upload_pdf": {
+    "message": "Please use the form to upload your PDF file to read aloud"
   },
-  "uploadpdf_message2": {
-    "message": "If you wish, you can use the form below to upload your PDF file to {extension_name} server temporarily for reading. Your file will be removed from the server after you view it."
-  },
-  "uploadpdf_submit_button": {
-    "message": "Upload & Open"
+  "error_page_unreadable": {
+    "message": "Cannot read aloud this website"
   },
   "languages_heading": {
     "message": "Select Languages"

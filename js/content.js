@@ -1,10 +1,9 @@
 (function() {
+  var brapi = (typeof chrome != 'undefined') ? chrome : (typeof browser != 'undefined' ? browser : {});
+  var paragraphSplitter = /(?:\s*\r?\n\s*){2,}/;
+
   window.connect = connect;
   window.HtmlDoc = HtmlDoc;
-
-var readAloud = {
-  paraSplitter: /(?:\s*\r?\n\s*){2,}/
-};
 
 function connect(name) {
   if (!window.docReady) window.docReady = makeDoc();
@@ -13,7 +12,7 @@ function connect(name) {
 
 
 function startService(name, doc) {
-  var port = chrome.runtime.connect({name: name});
+  var port = brapi.runtime.connect({name: name});
   port.onMessage.addListener(dispatch.bind(null, {
     raGetInfo: getInfo,
     raGetCurrentIndex: getCurrentIndex,
@@ -32,13 +31,13 @@ function startService(name, doc) {
 
   function getInfo(request) {
     var lang = document.documentElement.lang || $("html").attr("xml:lang");
-    if (lang) lang = lang.replace(/_/g, '-');
+    if (lang) lang = lang.split(",",1)[0].replace(/_/g, '-');
     if (lang == "en" || lang == "en-US") lang = null;    //foreign language pages often erronenously declare lang="en"
     return {
-      redirect: doc.redirect,
       url: location.href,
       title: document.title,
-      lang: lang
+      lang: lang,
+      requireJs: doc.requireJs
     }
   }
 
@@ -49,7 +48,7 @@ function startService(name, doc) {
 
   function getTexts(request) {
     if (request.index < 0) {
-      if (request.index == -100) return getSelectedText().split(readAloud.paraSplitter);
+      if (request.index == -100) return getSelectedText().split(paragraphSplitter);
       else return null;
     }
     else {
@@ -93,12 +92,17 @@ function makeDoc() {
       else if ($(".drive-viewer-paginated-scrollable").length) return new GDriveDoc();
       else return new HtmlDoc();
     }
-    else if (location.hostname == "drive.google.com") return new GDriveDoc();
+    else if (location.hostname == "drive.google.com") {
+      if ($(".drive-viewer-paginated-scrollable").length) return new GDriveDoc();
+      else return new GDrivePreview();
+    }
     else if (/^read\.amazon\./.test(location.hostname)) return new KindleBook();
-    else if (location.hostname == "www.quora.com") return new QuoraPage();
     else if (location.hostname == "www.khanacademy.org") return new KhanAcademy();
-    else if (location.hostname == "bookshelf.vitalsource.com") return new VitalSourceBookshelf();
-    else if (location.hostname == "reader.chegg.com") return new CheggBook();
+    else if (location.pathname.match(/pdf-upload\.html$/)) {
+      var doc = new PdfDoc();
+      doc.ready = Promise.resolve();
+      return doc;
+    }
     else if (location.pathname.match(/\.pdf$/)) return new PdfDoc(location.href);
     else if ($("embed[type='application/pdf']").length) return new PdfDoc($("embed[type='application/pdf']").attr("src"));
     else return new HtmlDoc();
@@ -109,22 +113,19 @@ function makeDoc() {
 function GoogleDoc() {
   var viewport = $(".kix-appview-editor").get(0);
   var pages = $(".kix-page");
+  var selectionState;
 
-  this.ready = readAloud.loadScript(chrome.runtime.getURL("js/googleDocsUtil.js"));
+  this.requireJs = ["js/googleDocsUtil.js"];
 
   this.getCurrentIndex = function() {
-    var doc = googleDocsUtil.getGoogleDocument();
-    if (doc.selectedText) return 9999;
+    if (getSelectedText()) return 9999;
 
     for (var i=0; i<pages.length; i++) if (pages.eq(i).position().top > viewport.scrollTop+$(viewport).height()/2) break;
     return i-1;
   }
 
   this.getTexts = function(index, quietly) {
-    if (index == 9999) {
-      var doc = googleDocsUtil.getGoogleDocument();
-      return [doc.selectedText];
-    }
+    if (index == 9999) return [getSelectedText()];
 
     var page = pages.get(index);
     if (page) {
@@ -144,6 +145,25 @@ function GoogleDoc() {
       .map(getInnerText)
       .filter(isNotEmpty);
   }
+
+  function getSelectedText() {
+    var doc = googleDocsUtil.getGoogleDocument();
+    //first time
+    if (!selectionState) selectionState = {caret: doc.caret.index, prev: [], text: doc.selectedText};
+    //if caret has not moved, assume selection state hasn't changed
+    //if caret has moved, update selection state
+    if (selectionState.caret != doc.caret.index) {
+      selectionState.caret = doc.caret.index;
+      selectionState.prev.push(selectionState.text);
+      selectionState.text = doc.selectedText;
+      selectionState.prev = selectionState.prev.filter(function(text) {
+        var index = selectionState.text.indexOf(text);
+        if (index != -1) selectionState.text = selectionState.text.slice(0,index) + selectionState.text.slice(index+text.length);
+        return index != -1;
+      })
+    }
+    return selectionState.text;
+  }
 }
 
 
@@ -152,6 +172,40 @@ function GDriveDoc() {
   var pages = $(".drive-viewer-paginated-page");
 
   this.getCurrentIndex = function() {
+    for (var i=0; i<pages.length; i++) if (pages.eq(i).position().top > viewport.scrollTop+$(viewport).height()/2) break;
+    return i-1;
+  }
+
+  this.getTexts = function(index, quietly) {
+    var page = pages.get(index);
+    if (page) {
+      var oldScrollTop = viewport.scrollTop;
+      viewport.scrollTop = $(page).position().top;
+      return tryGetTexts(getTexts.bind(page), 3000)
+        .then(function(result) {
+          if (quietly) viewport.scrollTop = oldScrollTop;
+          return result;
+        })
+    }
+    else return null;
+  }
+
+  function getTexts() {
+    var texts = $("p", this).get()
+      .map(getInnerText)
+      .filter(isNotEmpty);
+    return fixParagraphs(texts);
+  }
+}
+
+
+function GDrivePreview() {
+  var viewport, pages;
+
+  this.getCurrentIndex = function() {
+    var doc = $("[role=document]:visible").eq(0);
+    viewport = doc.parent().get(0);
+    pages = doc.children().slice(doc.children().first().is("[role=button]") ? 2 : 1);
     for (var i=0; i<pages.length; i++) if (pages.eq(i).position().top > viewport.scrollTop+$(viewport).height()/2) break;
     return i-1;
   }
@@ -205,7 +259,7 @@ function KindleBook() {
   function getTexts() {
     var texts = [];
     contentFrames.filter(function(frame) {
-      return frame.style.visibility != "hidden";
+      return frame != null && frame.style.visibility != "hidden";
     })
     .forEach(function(frame) {
       var frameHeight = $(frame).height();
@@ -226,239 +280,26 @@ function KindleBook() {
 
 
 function PdfDoc(url) {
-  var viewerBase = "https://assets.lsdsoftware.com/read-aloud/pdf-viewer/web/";
-  var uploadDialog;
-  var foundText;
+  var queue = new EventQueue("PdfDoc");
 
-  if (/^file:/.test(url)) {
-    this.ready = readAloud.loadCss(chrome.runtime.getURL("css/jquery-ui.min.css"))
-      .then(readAloud.loadScript.bind(null, chrome.runtime.getURL("js/jquery-ui.min.js")))
-      .then(createUploadDialog)
-      .then(function(dialog) {uploadDialog = dialog})
-  }
-  else {
-    this.ready = readAloud.loadCss(viewerBase + "viewer.css")
-      .then(loadViewerHtml)
-      .then(showLoadingIcon)
-      .then(appendLocaleResourceLink)
-      .then(readAloud.loadScript.bind(null, viewerBase + "../build/pdf.js"))
-      .then(rebaseUrls)
-      .then(readAloud.loadScript.bind(null, viewerBase + "pdf.viewer.js", viewerJsPreprocessor))
-      .then(loadPdf)
-      .then(hideLoadingIcon)
-  }
+  this.ready = new Promise(function(fulfill) {
+    queue.once("pageScriptLoaded", function() {
+      queue.trigger("loadDocument", url);
+    })
+    queue.once("documentLoaded", fulfill);
+    loadPageScript("https://assets.lsdsoftware.com/read-aloud/page-scripts/pdf-viewer.js");
+  })
 
-  function loadViewerHtml() {
-    return new Promise(function(fulfill, reject) {
-      $.ajax(viewerBase + "viewer.html", {
-        dataType: "text",
-        success: function(text) {
-          var start = text.indexOf(">", text.indexOf("<body")) +1;
-          var end = text.indexOf("</body>");
-          document.body.innerHTML = text.slice(start, end);
-          fulfill();
-        },
-        error: function() {
-          reject(new Error("Failed to load viewer html"));
-        }
-      })
+  this.getCurrentIndex = function() {
+    return new Promise(function(fulfill) {
+      queue.once("currentIndexGot", fulfill).trigger("getCurrentIndex");
     })
   }
 
-  function appendLocaleResourceLink() {
-    $('<link>')
-      .appendTo("head")
-      .attr({rel: "resource", type: "application/l10n", href: viewerBase + "locale/locale.properties"});
-  }
-
-  function rebaseUrls() {
-    var wrap = function(prop) {
-      var value = PDFJS[prop];
-      Object.defineProperty(PDFJS, prop, {
-        enumerable: true,
-        configurable: true,
-        get: function() {return viewerBase + value},
-        set: function(val) {value = val}
-      })
-    };
-    wrap("imageResourcesPath");
-    wrap("workerSrc");
-    wrap("cMapUrl");
-  }
-
-  function viewerJsPreprocessor(text) {
-    return text.replace("compressed.tracemonkey-pldi-09.pdf", "");
-  }
-
-  function loadPdf() {
-    return PDFViewerApplication.open(url)
-      .then(function() {
-        return new Promise(function(fulfill) {
-          PDFViewerApplication.eventBus.on("documentload", fulfill);
-        })
-      })
-  }
-
-  function showLoadingIcon() {
-    if (!$(".ra-loading-icon").length) {
-      var holder = $("<div>")
-        .addClass("ra-loading-icon")
-        .css({position: "absolute", left: "50%", top: "50%"})
-        .appendTo(document.body)
-      $("<img>")
-        .attr("src", chrome.runtime.getURL("img/throb.gif"))
-        .css({position: "relative", width: 48, left: -24, top: -24})
-        .appendTo(holder)
-    }
-    $(".ra-loading-icon").show();
-  }
-
-  function hideLoadingIcon() {
-    $(".ra-loading-icon").hide();
-  }
-
-  this.getCurrentIndex = function() {
-    if (uploadDialog) {
-      return 0;
-    }
-    var pageNo = PDFViewerApplication.page;
-    return pageNo ? pageNo-1 : 0;
-  }
-
   this.getTexts = function(index, quietly) {
-    if (uploadDialog) {
-      uploadDialog.show();
-      return null;
-    }
-    var pdf = PDFViewerApplication.pdfDocument;
-    if (index < pdf.numPages) {
-      if (!quietly) PDFViewerApplication.page = index+1;
-      return pdf.getPage(index+1)
-        .then(getPageTexts)
-        .then(function(texts) {
-          if (texts.length) foundText = true;
-          return texts;
-        })
-    }
-    else {
-      if (!foundText) showNoTextExplanation();
-      return null;
-    }
-  }
-
-  function getPageTexts(page) {
-    return page.getTextContent()
-      .then(function(content) {
-        var lines = [];
-        for (var i=0; i<content.items.length; i++) {
-          if (lines.length == 0 || i > 0 && content.items[i-1].transform[5] != content.items[i].transform[5]) lines.push("");
-          lines[lines.length-1] += content.items[i].str;
-        }
-        return lines.map(function(line) {return line.trim()});
-      })
-      .then(fixParagraphs)
-  }
-
-  function createUploadDialog() {
-    var div = $("<div>");
-    $("<p>")
-      .text(formatMessage({code: "uploadpdf_message1", extension_name: chrome.i18n.getMessage("extension_short_name")}))
-      .css("color", "blue")
-      .appendTo(div);
-    $("<p>")
-      .text(formatMessage({code: "uploadpdf_message2", extension_name: chrome.i18n.getMessage("extension_short_name")}))
-      .appendTo(div);
-    var form = $("<form>")
-      .attr("action", "https://support2.lsdsoftware.com/dropmeafile-readaloud/upload")
-      .attr("method", "POST")
-      .attr("enctype", "multipart/form-data")
-      .on("submit", function() {
-        btnSubmit.prop("disabled", true);
-      })
-      .appendTo(div);
-    $("<input>")
-      .attr("type", "file")
-      .attr("name", "fileToUpload")
-      .attr("accept", "application/pdf")
-      .on("change", function() {
-        btnSubmit.prop("disabled", !$(this).val())
-      })
-      .appendTo(form);
-    $("<br>")
-      .appendTo(form);
-    $("<br>")
-      .appendTo(form);
-    var btnSubmit = $("<input>")
-      .attr("type", "submit")
-      .attr("value", chrome.i18n.getMessage("uploadpdf_submit_button"))
-      .prop("disabled", true)
-      .appendTo(form);
-
-    div.dialog({
-        title: chrome.i18n.getMessage("extension_short_name"),
-        width: 450,
-        modal: true,
-        autoOpen: false
-      })
-    return {
-      show: function() {
-        div.dialog("open");
-      }
-    }
-  }
-
-  function showNoTextExplanation() {
-    Promise.resolve()
-      .then(function() {
-        if (!$.ui)
-          return readAloud.loadCss(chrome.runtime.getURL("css/jquery-ui.min.css"))
-            .then(readAloud.loadScript.bind(null, chrome.runtime.getURL("js/jquery-ui.min.js")))
-      })
-      .then(function() {
-        var div = $("<div>");
-        $("<p>")
-          .text("I can't find any text to read.  This is probably because this PDF contains scanned images of text instead of the actual text.  If you're unable to select any text using your mouse, it means they are images.")
-          .css("color", "blue")
-          .appendTo(div);
-        div.dialog({
-            title: chrome.i18n.getMessage("extension_short_name"),
-            width: 450
-          })
-      })
-  }
-
-  function formatMessage(msg) {
-    var message = chrome.i18n.getMessage(msg.code);
-    if (message) message = message.replace(/{(\w+)}/g, function(m, p1) {return msg[p1]});
-    return message;
-  }
-}
-
-
-function QuoraPage() {
-  this.getCurrentIndex = function() {
-    return 0;
-  }
-
-  this.getTexts = function(index) {
-    if (index == 0) return parse();
-    else return null;
-  }
-
-  function parse() {
-    var texts = [];
-    var elem = $(".QuestionArea .question_qtext").get(0);
-    if (elem) texts.push(elem.innerText);
-    $(".AnswerBase")
-      .each(function() {
-        elem = $(this).find(".feed_item_answer_user .user").get(0);
-        if (elem) texts.push("Answer by " + elem.innerText);
-        elem = $(this).find(".rendered_qtext").get(0);
-        if (elem) texts.push.apply(texts, elem.innerText.split(readAloud.paraSplitter));
-        elem = $(this).find(".AnswerFooter").get(0);
-        if (elem) texts.push(elem.innerText);
-      })
-    return texts;
+    return new Promise(function(fulfill) {
+      queue.once("textsGot", fulfill).trigger("getTexts", index, quietly);
+    })
   }
 }
 
@@ -486,56 +327,8 @@ function KhanAcademy() {
 }
 
 
-function VitalSourceBookshelf() {
-  this.redirect = true;
-
-  this.getCurrentIndex = function() {
-    return 0
-  };
-
-  this.getTexts = function() {
-    var iframe = $("#jigsaw-placeholder > iframe").get(0);
-    if (iframe) location.href = iframe.src;
-    return null;
-  };
-}
-
-
-function CheggBook() {
-  this.getCurrentIndex = function() {
-    return $(".page.current").index();
-  }
-
-  this.getTexts = function(index, quietly) {
-    var firstPage = $(".page").get(0);
-    var page = $(".page").get(index);
-    if (page) {
-      var viewport = $(".PageScroller").get(0);
-      var oldScrollTop = viewport.scrollTop;
-      viewport.scrollTop = $(page).position().top - $(firstPage).position().top;
-      return tryGetTexts(getTexts.bind(page), 4000)
-        .then(function(result) {
-          if (quietly) viewport.scrollTop = oldScrollTop;
-          return result;
-        })
-    }
-    else return null;
-  }
-
-  function getTexts() {
-    var texts = $("> .content > .newpage > .text_layer > .ie_fix > div > span", this).get().map(getInnerText).filter(isNotEmpty);
-    return fixParagraphs(texts).map(replaceSurrogates);
-  }
-
-  function replaceSurrogates(text) {
-    return text.replace(/\udbbe\udf02/g, "fl")
-      .replace(/\udbbe\udf01/g, "fi")
-  }
-}
-
-
 function HtmlDoc() {
-  var ignoreTags = "select, textarea, button, label, audio, video, dialog, embed, menu, nav, noframes, noscript, object, script, style, svg, aside, footer, #footer";
+  var ignoreTags = "select, textarea, button, label, audio, video, dialog, embed, menu, nav, noframes, noscript, object, script, style, svg, aside, footer, #footer, .no-read-aloud";
 
   this.getCurrentIndex = function() {
     return 0;
@@ -593,7 +386,7 @@ function HtmlDoc() {
       return node.nodeType == 3 && node.nodeValue.trim().length >= 3;
     };
     var isParagraph = function(node) {
-      return node.nodeType == 1 && $(node).is("p") && getInnerText(node).length >= threshold;
+      return node.nodeType == 1 && $(node).is("p:visible") && getInnerText(node).length >= threshold;
     };
     var hasTextNodes = function(elem) {
       return someChildNodes(elem, isTextNode) && getInnerText(elem).length >= threshold;
@@ -654,7 +447,7 @@ function HtmlDoc() {
     $(elem).find("ol, ul").addBack("ol, ul").each(addNumbering);
     var texts = $(elem).data("read-aloud-multi-block")
       ? $(elem).children(":visible").get().map(getText)
-      : getText(elem).split(readAloud.paraSplitter);
+      : getText(elem).split(paragraphSplitter);
     $(elem).find(".read-aloud-numbering").remove();
     toHide.show();
     return texts;
@@ -780,25 +573,37 @@ function tryGetTexts(getTexts, millis) {
   }
 }
 
-readAloud.loadCss = function(url) {
+function loadPageScript(url) {
   if (!$("head").length) $("<head>").prependTo("html");
-  $("<link>").appendTo("head").attr({type: "text/css", rel: "stylesheet", href: url});
-  return Promise.resolve();
+  $.ajax({
+    dataType: "script",
+    cache: true,
+    url: url
+  });
 }
 
-readAloud.loadScript = function(url, preprocess) {
-  return new Promise(function(fulfill, reject) {
-    $.ajax(url, {
-      dataType: "text",
-      success: function(text) {
-        eval.call(window, preprocess ? preprocess(text) : text);
-        fulfill();
-      },
-      error: function() {
-        reject(new Error("Failed to load script"));
-      }
+function EventQueue(prefix) {
+  this.on = function(eventType, callback) {
+    document.addEventListener(prefix+eventType, function(event) {
+      callback.apply(null, JSON.parse(event.detail));
     })
-  })
+    return this;
+  }
+
+  this.once = function(eventType, callback) {
+    var handler = function(event) {
+      document.removeEventListener(prefix+eventType, handler);
+      callback.apply(null, JSON.parse(event.detail));
+    };
+    document.addEventListener(prefix+eventType, handler);
+    return this;
+  }
+
+  this.trigger = function(eventType) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    document.dispatchEvent(new CustomEvent(prefix+eventType, {detail: JSON.stringify(args)}));
+    return this;
+  }
 }
 
 })();

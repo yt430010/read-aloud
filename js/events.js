@@ -1,15 +1,15 @@
 
 var activeDoc;
 
-chrome.runtime.onInstalled.addListener(function() {
-  chrome.contextMenus.create({
+brapi.runtime.onInstalled.addListener(function() {
+  brapi.contextMenus.create({
     id: "read-selection",
-    title: chrome.i18n.getMessage("context_read_selection"),
+    title: brapi.i18n.getMessage("context_read_selection"),
     contexts: ["selection"]
   });
 })
 
-chrome.contextMenus.onClicked.addListener(function(info, tab) {
+brapi.contextMenus.onClicked.addListener(function(info, tab) {
   if (info.menuItemId == "read-selection")
     stop().then(function() {
       playText(info.selectionText, function(err) {
@@ -18,7 +18,7 @@ chrome.contextMenus.onClicked.addListener(function(info, tab) {
     })
 })
 
-chrome.commands.onCommand.addListener(function(command) {
+brapi.commands.onCommand.addListener(function(command) {
   if (command == "play") {
     getPlaybackState()
       .then(function(state) {
@@ -31,10 +31,21 @@ chrome.commands.onCommand.addListener(function(command) {
   else if (command == "rewind") rewind();
 })
 
+if (brapi.ttsEngine) (function() {
+  brapi.ttsEngine.onSpeak.addListener(function(utterance, options, onEvent) {
+    options = Object.assign({}, options, {voice: {voiceName: options.voiceName}});
+    remoteTtsEngine.speak(utterance, options, onEvent);
+  });
+  brapi.ttsEngine.onStop.addListener(remoteTtsEngine.stop);
+  brapi.ttsEngine.onPause.addListener(remoteTtsEngine.pause);
+  brapi.ttsEngine.onResume.addListener(remoteTtsEngine.resume);
+})()
+
+
 function playText(text, onEnd) {
   if (!activeDoc) {
     activeDoc = new Doc(new SimpleSource(text.split(/(?:\r?\n){2,}/)), function(err) {
-      if (!err) closeDoc();
+      closeDoc();
       if (typeof onEnd == "function") onEnd(err);
     })
   }
@@ -45,7 +56,7 @@ function playText(text, onEnd) {
 function play(onEnd) {
   if (!activeDoc) {
     activeDoc = new Doc(new TabSource(), function(err) {
-      if (!err) closeDoc();
+      closeDoc();
       if (typeof onEnd == "function") onEnd(err);
     })
   }
@@ -55,9 +66,9 @@ function play(onEnd) {
 
 function stop() {
   if (activeDoc) {
-    return activeDoc.stop()
-      .then(closeDoc)
-      .catch(function(err) {closeDoc(); throw err})
+    activeDoc.stop();
+    closeDoc();
+    return Promise.resolve();
   }
   else return Promise.resolve();
 }
@@ -74,6 +85,11 @@ function getPlaybackState() {
 
 function getActiveSpeech() {
   if (activeDoc) return activeDoc.getActiveSpeech();
+  else return Promise.resolve(null);
+}
+
+function getDocInfo() {
+  if (activeDoc) return activeDoc.getInfo();
   else return Promise.resolve(null);
 }
 
@@ -95,10 +111,12 @@ function rewind() {
 }
 
 function reportIssue(url, comment) {
+  var manifest = brapi.runtime.getManifest();
   return getSettings()
     .then(function(settings) {
       if (url) settings.url = url;
-      settings.browser = config.browser;
+      settings.version = manifest.version;
+      settings.userAgent = navigator.userAgent;
       return ajaxPost(config.serviceUrl + "/read-aloud/report-issue", {
         url: JSON.stringify(settings),
         comment: comment

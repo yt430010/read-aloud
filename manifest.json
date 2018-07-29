@@ -4,7 +4,7 @@
   "name": "__MSG_extension_name__",
   "short_name": "__MSG_extension_short_name__",
   "description": "__MSG_extension_description__",
-  "version": "1.2.13",
+  "version": "1.3.6",
   "default_locale": "en",
 
   "browser_action": {
@@ -12,8 +12,8 @@
     "default_popup": "popup.html"
   },
   "icons": {
-    "16": "img/icon.png",
-    "48": "img/icon.png",
+    "16": "img/icon-16.png",
+    "48": "img/icon-48.png",
     "128": "img/icon.png"
   },
   "permissions": [
@@ -25,13 +25,8 @@
     "https://*.amazonaws.com/",
     "https://support.lsdsoftware.com/"
   ],
-  "content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'",
+  "content_security_policy": "script-src 'self'; object-src 'self'",
   "web_accessible_resources": [
-    "img/*",
-    "js/jquery-ui.min.js",
-    "css/jquery-ui.min.css",
-    "css/images/*",
-    "js/googleDocsUtil.js"
   ],
   "background": {
     "scripts": [
@@ -40,27 +35,30 @@
       "js/speech.js",
       "js/document.js",
       "js/aws-sdk.js",
-      "js/googletr_tts.js",
       "js/events.js"
     ],
     "persistent": false
   },
   "options_page": "options.html",
+  "options_ui": {
+    "page": "options.html",
+    "chrome_style": true
+  },
   "commands": {
     "play": {
-      "suggested_key": {"default": "Alt+Shift+P"},
+      "suggested_key": {"default": "Alt+P"},
       "description": "play/pause"
     },
     "stop": {
-      "suggested_key": {"default": "Alt+Shift+S"},
+      "suggested_key": {"default": "Alt+O"},
       "description": "stop"
     },
     "forward": {
-      "suggested_key": {"default": "Alt+Shift+N"},
+      "suggested_key": {"default": "Alt+Period"},
       "description": "forward"
     },
     "rewind": {
-      "suggested_key": {"default": "Alt+Shift+B"},
+      "suggested_key": {"default": "Alt+Comma"},
       "description": "rewind"
     }
   },
@@ -223,7 +221,12 @@
       {"voice_name": "Microsoft US English (David)", "lang": "en-US", "gender": "male", "event_types": ["start", "end", "error"]},
       {"voice_name": "Microsoft US English (Mark)", "lang": "en-US", "gender": "male", "event_types": ["start", "end", "error"]},
       {"voice_name": "Microsoft US English (Zira)", "lang": "en-US", "gender": "female", "event_types": ["start", "end", "error"]},
-      {"voice_name": "Microsoft Vietnamese (An)", "lang": "vi-VI", "gender": "male", "event_types": ["start", "end", "error"]}
+      {"voice_name": "Microsoft Vietnamese (An)", "lang": "vi-VI", "gender": "male", "event_types": ["start", "end", "error"]},
+
+      {"voice_name": "OpenFPT Vietnamese (Thu Dung)", "lang": "vi-VI", "gender": "female", "event_types": ["start", "end", "error"]},
+      {"voice_name": "OpenFPT Vietnamese (Cao Chung)", "lang": "vi-VI", "gender": "male", "event_types": ["start", "end", "error"]},
+      {"voice_name": "OpenFPT Vietnamese (Ha Tieu Mai)", "lang": "vi-VI", "gender": "female", "event_types": ["start", "end", "error"]},
+      {"voice_name": "OpenFPT Vietnamese (Ngoc Lam)", "lang": "vi-VI", "gender": "female", "event_types": ["start", "end", "error"]}
     ]
   }
 }

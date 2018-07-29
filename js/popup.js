@@ -6,17 +6,16 @@ $(function() {
     getBackgroundPage()
       .then(function(master) {
         return master.play(function(err) {
-            if (err) $("#status").text(err.message).show();
-          })
-          .then(function(docInfo) {
-            if (docInfo && docInfo.redirect) window.close();
-            return setState("lastUrl", docInfo && docInfo.url);
+            if (err) showError(err);
           })
           .then(updateButtons)
+          .then(master.getDocInfo)
+          .then(function(docInfo) {return setState("lastUrl", docInfo && docInfo.url)})
           .catch(function(err) {
-            master.reportIssue(null, err.stack);
-            if (/^{/.test(err.message)) $("#status").text(formatError(JSON.parse(err.message)) || err.message).show();
-            else window.close();
+            if (err.stack) {
+              master.reportIssue(null, err.stack.startsWith(err.name) ? err.stack : (err.name + ": " + err.message + "\n" + err.stack));
+            }
+            showError(err);
           });
       })
   });
@@ -25,6 +24,13 @@ $(function() {
   $("#btnSettings").click(function() {location.href = "options.html"});
   $("#btnForward").click(function() {getBackgroundPage().then(callMethod("forward")).then(updateButtons)});
   $("#btnRewind").click(function() {getBackgroundPage().then(callMethod("rewind")).then(updateButtons)});
+  $("#resize").click(function() {
+    getSettings(["highlightWindowSize"])
+      .then(function(settings) {
+        updateSettings({highlightWindowSize: ((settings.highlightWindowSize || 0) + 1) % 3});
+        updateSize();
+      })
+  })
 
   updateButtons()
     .then(getBackgroundPage)
@@ -34,8 +40,14 @@ $(function() {
     });
   setInterval(updateButtons, 500);
 
+  updateSize();
   checkAnnouncements();
 });
+
+function showError(err) {
+  if (/^{/.test(err.message)) $("#status").text(formatError(JSON.parse(err.message)) || err.message).show();
+  else $("#status").text(err.message).show();
+}
 
 function updateButtons() {
   return getBackgroundPage().then(function(master) {
@@ -52,8 +64,8 @@ function updateButtons() {
     $("#btnPause").toggle(state == "PLAYING");
     $("#btnStop").toggle(state == "PAUSED" || state == "PLAYING" || state == "LOADING");
     $("#btnForward, #btnRewind").toggle(state == "PLAYING");
-    $("#attribution").toggle(Boolean(speech && isGoogleTranslate(speech.options.voiceName)));
-    $("#highlight").toggle(Boolean(settings.showHighlighting != null ? settings.showHighlighting : defaults.showHighlighting) && (state == "PAUSED" || state == "PLAYING"));
+    $("#attribution").toggle(Boolean(speech && isGoogleTranslate(speech.options.voice.voiceName)));
+    $("#highlight, #resize").toggle(Boolean(settings.showHighlighting != null ? settings.showHighlighting : defaults.showHighlighting) && (state == "PAUSED" || state == "PLAYING"));
 
     if (settings.showHighlighting && speech) {
       var pos = speech.getPosition();
@@ -78,6 +90,20 @@ function updateButtons() {
       }
     }
   }));
+}
+
+function updateSize() {
+  getSettings(["highlightWindowSize"])
+    .then(function(settings) {
+      switch (settings.highlightWindowSize) {
+        case 2: return [720, 420];
+        case 1: return [520, 390];
+        default: return [400, 300];
+      }
+    })
+    .then(function(size) {
+      $("#highlight").css({width: size[0], height: size[1]});
+    })
 }
 
 function checkAnnouncements() {

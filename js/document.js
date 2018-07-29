@@ -19,8 +19,25 @@ function SimpleSource(texts) {
 function TabSource() {
   var port;
   var waiting = true;
-  var ready = connect()
+  var ready = getActiveTab()
+    .then(function(tab) {
+      if (!tab.url) return;
+      if (/^file:/.test(tab.url)) {
+        setTabUrl(tab.id, "https://assets.lsdsoftware.com/read-aloud/page-scripts/pdf-upload.html");
+        throw new Error(JSON.stringify({code: "error_upload_pdf"}));
+      }
+      else if (isUnsupportedSite(tab.url)) {
+        throw new Error(JSON.stringify({code: "error_page_unreadable"}));
+      }
+    })
+    .then(connect)
     .then(send.bind(null, {method: "raGetInfo"}))
+    .then(extraAction(function(result) {
+      if (result.requireJs) {
+        var tasks = result.requireJs.map(function(file) {return executeFile.bind(null, file)});
+        return inSequence(tasks);
+      }
+    }))
     .then(function(result) {
       waiting = false;
       return result;
@@ -46,12 +63,12 @@ function TabSource() {
     return new Promise(function(fulfill, reject) {
       function onConnect(result) {
         if (result.name == name) {
-          chrome.runtime.onConnect.removeListener(onConnect);
+          brapi.runtime.onConnect.removeListener(onConnect);
           setPort(result);
           fulfill();
         }
       }
-      chrome.runtime.onConnect.addListener(onConnect);
+      brapi.runtime.onConnect.addListener(onConnect);
       injectScripts(name).catch(reject);
     })
   }
@@ -94,14 +111,19 @@ function TabSource() {
 
 
 function Doc(source, onEnd) {
+  var info;
   var currentIndex;
   var activeSpeech;
-  var ready = source.ready;
+  var ready = source.ready.then(function(result) {
+    info = result;
+  })
+  var hasText;
 
   this.close = close;
   this.play = play;
   this.stop = stop;
   this.pause = pause;
+  this.getInfo = getInfo;
   this.getState = getState;
   this.getActiveSpeech = getActiveSpeech;
   this.forward = forward;
@@ -120,16 +142,12 @@ function Doc(source, onEnd) {
   //method play
   function play() {
     return ready
-      .then(function(docInfo) {
-        if (activeSpeech) {
-          return activeSpeech.play()
-            .then(function() {return docInfo})
-        }
+      .then(function() {
+        if (activeSpeech) return activeSpeech.play();
         else {
           return source.getCurrentIndex()
             .then(function(index) {currentIndex = index})
             .then(function() {return readCurrent()})
-            .then(function() {return docInfo})
         }
       })
   }
@@ -140,19 +158,23 @@ function Doc(source, onEnd) {
         return null;
       })
       .then(function(texts) {
-        if (texts) return read(texts);
-        else if (onEnd) onEnd();
+        if (texts) {
+          if (texts.length) hasText = true;
+          return read(texts);
+        }
+        else if (onEnd) {
+          if (hasText) onEnd();
+          else onEnd(new Error(JSON.stringify({code: "error_no_text"})));
+        }
       })
     function read(texts) {
-      return ready
-        .then(function(docInfo) {
+      return Promise.resolve()
+        .then(function() {
+          if (info.detectedLang == null)
             return detectLanguage(texts)
               .then(function(lang) {
                 console.log("Detected", lang);
-                if (lang) {
-                  if (docInfo.lang && docInfo.lang.lastIndexOf(lang,0) == 0);
-                  else docInfo.lang = lang;
-                }
+                info.detectedLang = lang || "";
               })
         })
         .then(getSpeech.bind(null, texts))
@@ -177,6 +199,7 @@ function Doc(source, onEnd) {
 
   function detectLanguage(texts) {
     var minChars = 1000;
+    var maxPages = 10;
     var output = combineTexts("", texts);
     return output.length<minChars ? accumulateMore(output, currentIndex+1).then(detectLanguageOf) : detectLanguageOf(output);
 
@@ -189,41 +212,58 @@ function Doc(source, onEnd) {
         .then(function(texts) {
           if (!texts) return output;
           output = combineTexts(output, texts);
-          return output.length<minChars ? accumulateMore(output, index+1) : output;
+          return output.length<minChars && index-currentIndex<maxPages ? accumulateMore(output, index+1) : output;
         })
     }
   }
 
   function detectLanguageOf(text) {
-    if (chrome.i18n.detectLanguage)
-      return new Promise(function(fulfill) {
-        chrome.i18n.detectLanguage(text, function(result) {
+    return browserDetectLanguage(text)
+      .then(function(result) {
+        return result || serverDetectLanguage(text);
+      })
+  }
+
+  function browserDetectLanguage(text) {
+    if (!brapi.i18n.detectLanguage) return Promise.resolve(null);
+    return new Promise(function(fulfill) {
+      brapi.i18n.detectLanguage(text, fulfill);
+    })
+    .then(function(result) {
+      if (result) {
           var list = result.languages.filter(function(item) {return item.language != "und"});
           list.sort(function(a,b) {return b.percentage-a.percentage});
-          fulfill(list[0] && list[0].language);
-        })
-      })
-    else
+          return list[0] && list[0].language;
+      }
+      else {
+        return null;
+      }
+    })
+  }
+
+  function serverDetectLanguage(text) {
       return ajaxPost(config.serviceUrl + "/read-aloud/detect-language", {text: text}, "json")
         .then(JSON.parse)
         .then(function(list) {return list[0] && list[0].language})
   }
 
   function getSpeech(texts) {
-    return Promise.all([ready, getSettings()])
-      .then(spread(function(docInfo, settings) {
+    return getSettings()
+      .then(function(settings) {
+        var lang = (!info.detectedLang || info.lang && info.lang.startsWith(info.detectedLang)) ? info.lang : info.detectedLang;
         var options = {
           rate: settings.rate || defaults.rate,
           pitch: settings.pitch || defaults.pitch,
           volume: settings.volume || defaults.volume,
-          lang: docInfo.lang,
+          lang: config.langMap[lang] || lang || 'en-US',
         }
         return getSpeechVoice(settings.voiceName, options.lang)
-          .then(function(voiceName) {
-            options.voiceName = voiceName;
+          .then(function(voice) {
+            if (!voice) throw new Error(JSON.stringify({code: "error_no_voice", lang: options.lang}));
+            options.voice = voice;
             return new Speech(texts, options);
           })
-      }))
+      })
   }
 
   function getSpeechVoice(voiceName, lang) {
@@ -237,9 +277,6 @@ function Doc(source, onEnd) {
             || findVoiceByLang(voices, lang);
         }
         else return null;
-      })
-      .then(function(voice) {
-        return voice ? voice.voiceName : voiceName;
       })
   }
 
@@ -284,6 +321,11 @@ function Doc(source, onEnd) {
       .then(function() {
         if (activeSpeech) return activeSpeech.pause();
       })
+  }
+
+  //method getInfo
+  function getInfo() {
+    return ready.then(function() {return info});
   }
 
   //method getState

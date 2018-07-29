@@ -50,17 +50,17 @@
   "context_read_selection": {
     "message": "Leer en voz alta el texto seleccionado"
   },
+  "error_no_text": {
+    "message": "No encontré ningún texto para leer"
+  },
   "error_no_voice": {
-    "message": "Sin voz ({lang})"
+    "message": "Idioma no admitido '{lang}'"
   },
-  "uploadpdf_message1": {
-    "message": "No tengo permiso para leer archivos locales almacenados en su computadora."
+  "error_upload_pdf": {
+    "message": "Use el formulario para cargar su archivo PDF y leer en voz alta"
   },
-  "uploadpdf_message2": {
-    "message": "Si lo desea, puede utilizar el siguiente formulario para cargar su archivo PDF en el servidor de {extension_name} temporalmente para su lectura."
-  },
-  "uploadpdf_submit_button": {
-    "message": "Subir y Abrir"
+  "error_page_unreadable": {
+    "message": "No puedo leer en voz alta este sitio web"
   },
   "languages_heading": {
     "message": "Seleccionar idiomas"

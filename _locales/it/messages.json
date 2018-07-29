@@ -50,17 +50,17 @@
   "context_read_selection": {
     "message": "Leggi il testo selezionato"
   },
+  "error_no_text": {
+    "message": "Non ho trovato testo da leggere"
+  },
   "error_no_voice": {
-    "message": "Nessuna voce ({lang})"
+    "message": "Lingua non supportata '{lang}'"
   },
-  "uploadpdf_message1": {
-    "message": "{extension_name} non può accedere file locali sul tuo computer."
+  "error_upload_pdf": {
+    "message": "Usa il modulo per caricare il tuo file PDF per leggere ad alta voce"
   },
-  "uploadpdf_message2": {
-    "message": "Se desideri, puoi usare il form sottostante per caricare il tuo file PDF di lettura temporaneamente nel server di {extension_name}. Il tuo file sarà rimosso dal server dopo la tua visione."
-  },
-  "uploadpdf_submit_button": {
-    "message": "Carica & Apri"
+  "error_page_unreadable": {
+    "message": "Non posso leggere ad alta voce questo sito"
   },
   "languages_heading": {
     "message": "Seleziona le lingue"
